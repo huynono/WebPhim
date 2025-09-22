@@ -15,6 +15,9 @@ RUN cd backend && npm install
 # Copy source code
 COPY backend/ ./backend/
 
+# Generate Prisma client
+RUN cd backend && npx prisma generate
+
 # Expose port
 EXPOSE 3000
 

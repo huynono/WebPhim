@@ -1,8 +1,8 @@
 {
   "build": {
-    "command": "npm run build"
+    "command": "cd backend && npm install && npx prisma generate"
   },
   "start": {
-    "command": "npm start"
+    "command": "cd backend && npm start"
   }
 }

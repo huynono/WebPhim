@@ -4,9 +4,9 @@
   "description": "WebPhim Backend API",
   "main": "backend/index.js",
   "scripts": {
-    "start": "cd backend && npm install && npm start",
+    "start": "cd backend && npm install && npx prisma generate && npm start",
     "dev": "cd backend && npm run dev",
-    "build": "cd backend && npm install"
+    "build": "cd backend && npm install && npx prisma generate"
   },
   "keywords": ["movie", "streaming", "api", "nodejs"],
   "author": "",
