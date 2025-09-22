@@ -6,7 +6,6 @@ node_modules/
 .env.development.local
 .env.test.local
 .env.production.local
-project/node_modules/
 backend/node_modules/
-project/dist/
 uploads/
+project/

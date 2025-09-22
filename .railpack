@@ -6,6 +6,6 @@
     "command": "cd backend && npm start"
   },
   "install": {
-    "command": "npm run install-all"
+    "command": "cd backend && npm install"
   }
 }

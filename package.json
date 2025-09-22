@@ -1,21 +1,16 @@
 {
-  "name": "webphim",
+  "name": "webphim-backend",
   "version": "1.0.0",
-  "description": "WebPhim - Movie streaming platform",
+  "description": "WebPhim Backend API",
   "main": "backend/index.js",
   "scripts": {
     "start": "bash start.sh",
-    "build": "cd project && npm run build",
-    "install-all": "cd backend && npm install && cd ../project && npm install",
-    "dev": "concurrently \"cd backend && npm run dev\" \"cd project && npm run dev\""
+    "dev": "cd backend && npm run dev"
   },
-  "keywords": ["movie", "streaming", "react", "nodejs"],
+  "keywords": ["movie", "streaming", "api", "nodejs"],
   "author": "",
   "license": "ISC",
   "engines": {
     "node": ">=18.0.0"
-  },
-  "devDependencies": {
-    "concurrently": "^8.2.2"
   }
 }
