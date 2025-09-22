@@ -1,0 +1,369 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+
+
+model Movie {
+  id            Int             @id @default(autoincrement())
+  title         String
+  description   String?
+  slug          String          @unique
+  posterUrl     String?
+  backgroundUrl String?
+  releaseYear   Int?
+  country       String
+  status        String          @default("ongoing")
+  type          String          @default("single")
+  isHidden      Boolean         @default(false)  // <--- Thêm field ẩn/hiện
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  categories    CategoryOnMovie[]
+  genres        GenreOnMovie[]
+  episodes      Episode[]
+  actors        ActorOnMovie[]
+  ads           AdBanner[]
+  // xóa userId và user relation
+
+  views         Int             @default(0)   // <--- Thêm field này
+  likes         Int             @default(0)   // <--- Thêm field likes
+  averageRating Float?          @default(0)   // <--- Đánh giá trung bình
+  totalRatings  Int             @default(0)   // <--- Tổng số đánh giá
+  
+  // Relations
+  userUpload    UserUpload?
+  favorites     UserFavorite[]
+  watchHistory  WatchHistory[]
+  ratings       MovieRating[]   // <--- Đánh giá sao của user
+  comments      Comment[]       // <--- Bình luận của user
+}
+
+
+model Episode {
+  id        Int      @id @default(autoincrement())
+  title     String
+  videoUrl  String
+  movieId   Int
+  movie     Movie    @relation(fields: [movieId], references: [id])
+  createdAt DateTime @default(now())
+  
+  // Relations
+  watchHistory WatchHistory[]
+}
+
+model Category {
+  id     Int               @id @default(autoincrement())
+  name   String
+  slug   String            @default("")
+  movies CategoryOnMovie[]
+}
+
+model Genre {
+  id     Int            @id @default(autoincrement())
+  name   String
+  slug   String         @default("")
+  movies GenreOnMovie[]
+}
+
+model GenreOnMovie {
+  movieId Int
+  genreId Int
+  movie   Movie @relation(fields: [movieId], references: [id])
+  genre   Genre @relation(fields: [genreId], references: [id])
+
+  @@id([movieId, genreId])
+}
+
+model CategoryOnMovie {
+  movieId    Int
+  categoryId Int
+  movie      Movie    @relation(fields: [movieId], references: [id])
+  category   Category @relation(fields: [categoryId], references: [id])
+
+  @@id([movieId, categoryId])
+}
+
+model Actor {
+  id     Int            @id @default(autoincrement())
+  name   String
+  avatar String?
+  slug   String         @unique
+  movies ActorOnMovie[]
+}
+
+model ActorOnMovie {
+  movieId Int
+  actorId Int
+  movie   Movie @relation(fields: [movieId], references: [id])
+  actor   Actor @relation(fields: [actorId], references: [id])
+
+  @@id([movieId, actorId])
+}
+
+enum AdType {
+  PRE_ROLL   // trước khi phát phim
+  MID_ROLL   // trong khi phát phim (ở startTime)
+  OVERLAY    // banner phủ trên player
+}
+
+enum BannerType {
+  POPUP      // Banner pop-up giữa màn hình
+  FIXED      // Banner cố định cuối trang
+  MIDDLE     // Banner giữa nội dung
+  MOVIE_BANNER_1  // Banner 1 - Giữa video và nội dung phim
+  MOVIE_BANNER_2  // Banner 2 - Sau phần bình luận
+  MOVIE_BANNER_3  // Banner 3 - Dưới thông tin phim (sidebar)
+  MOVIE_BANNER_4  // Banner 4 - Banner cố định cuối trang
+}
+
+
+
+
+
+model AdBanner {
+  id          Int      @id @default(autoincrement())
+  videoUrl    String
+  linkUrl     String?
+  type        AdType   @default(PRE_ROLL)
+  startTime   Int?     // chỉ dùng khi type = MID_ROLL
+  duration    Int?     // ⬅️ thêm nếu cần hiển thị thời lượng quảng cáo
+  isSkippable Boolean  @default(false)  // ⬅️ thêm field skip
+  movieId     Int
+  movie       Movie    @relation(fields: [movieId], references: [id])
+  createdAt   DateTime @default(now())
+  skipAfter   Int?   // số giây bắt buộc xem trước khi skip
+   views       Int      @default(0)   // ⬅️ Lượt xem quảng cáo
+}
+
+// Banner quảng cáo trang chủ - đơn giản
+model HomeBanner {
+  id          Int         @id @default(autoincrement())
+  videoUrl    String      // URL video quảng cáo
+  linkUrl     String      // Link khi click vào banner
+  type        BannerType  @default(POPUP) // POPUP, FIXED, MIDDLE
+  isActive    Boolean     @default(true)
+  viewCount   Int         @default(0)     // Số lượt click vào banner
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  
+  @@index([type, isActive])
+}
+
+// Banner quảng cáo cho trang chi tiết phim
+
+
+enum UploadStatus {
+  PENDING   // Chờ duyệt
+  APPROVED  // Đã duyệt
+  REJECTED  // Từ chối
+}
+
+// User model cho authentication
+model User {
+  id            Int       @id @default(autoincrement())
+  email         String    @unique
+  name          String?
+  avatar        String?
+  provider      String    @default("local") // "local", "google", "facebook"
+  providerId    String?   // ID từ OAuth provider
+  password      String?   // Chỉ dùng cho local auth
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  // Relations
+  favorites     UserFavorite[]
+  watchHistory  WatchHistory[]
+  ratings       MovieRating[]   // <--- Đánh giá sao của user
+  comments      Comment[]       // <--- Bình luận của user
+  commentLikes  CommentLike[]   // <--- Like/dislike bình luận
+  commentReplies CommentReply[] // <--- Trả lời bình luận
+  replyLikes    ReplyLike[]     // <--- Like/dislike reply
+}
+
+// User favorites
+model UserFavorite {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  movieId   Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  movie     Movie    @relation(fields: [movieId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  
+  @@unique([userId, movieId])
+}
+
+// Watch history
+model WatchHistory {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  movieId   Int
+  episodeId Int?
+  progress  Int      @default(0) // Thời gian đã xem (giây)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  movie     Movie    @relation(fields: [movieId], references: [id], onDelete: Cascade)
+  episode   Episode? @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@unique([userId, movieId, episodeId])
+}
+
+model UserUpload {
+  id          Int          @id @default(autoincrement())
+  title       String
+  description String?
+  videoUrl    String       // URL video đã upload
+  posterUrl   String?      // URL poster (nếu có)
+  senderName  String       // Tên người gửi
+  status      UploadStatus @default(PENDING)
+  rejectReason String?     // Lý do từ chối (nếu có)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  
+  // Khi được approve, sẽ tạo Movie từ UserUpload này
+  approvedMovieId Int?     @unique
+  approvedMovie   Movie?   @relation(fields: [approvedMovieId], references: [id])
+}
+
+// OTP model for password reset
+model OTP {
+  id        Int      @id @default(autoincrement())
+  email     String
+  code      String   // 6-digit OTP code
+  isUsed    Boolean  @default(false)
+  expiresAt DateTime // Thời gian hết hạn
+  createdAt DateTime @default(now())
+  
+  @@index([email, code])
+  @@index([expiresAt])
+}
+
+// Movie Rating - Đánh giá sao của user cho phim
+model MovieRating {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  movieId   Int
+  rating    Int      // 1-5 sao
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  movie     Movie    @relation(fields: [movieId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, movieId]) // Mỗi user chỉ đánh giá 1 lần cho 1 phim
+  @@index([movieId])
+  @@index([userId])
+}
+
+// Comment - Bình luận của user cho phim
+model Comment {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  movieId   Int
+  content   String   // Nội dung bình luận
+  isEdited  Boolean  @default(false) // Đã chỉnh sửa chưa
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  movie     Movie    @relation(fields: [movieId], references: [id], onDelete: Cascade)
+  
+  // Relations
+  media     CommentMedia[]   // Ảnh/video đính kèm
+  likes     CommentLike[]    // Like/dislike
+  replies   CommentReply[]   // Trả lời bình luận
+  
+  @@index([movieId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+// Comment Media - Ảnh/video đính kèm trong bình luận
+model CommentMedia {
+  id        Int      @id @default(autoincrement())
+  commentId Int
+  mediaUrl  String   // URL ảnh/video
+  mediaType String   // "image" hoặc "video"
+  createdAt DateTime @default(now())
+  
+  comment   Comment  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  
+  @@index([commentId])
+}
+
+// Comment Like - Like/dislike bình luận
+model CommentLike {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  commentId Int
+  isLike    Boolean  // true = like, false = dislike
+  createdAt DateTime @default(now())
+  
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  comment   Comment  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, commentId]) // Mỗi user chỉ like/dislike 1 lần cho 1 bình luận
+  @@index([commentId])
+  @@index([userId])
+}
+
+// Reply Like - Like/dislike reply
+model ReplyLike {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  replyId   Int
+  isLike    Boolean  // true = like, false = dislike
+  createdAt DateTime @default(now())
+  
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reply     CommentReply @relation(fields: [replyId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, replyId]) // Mỗi user chỉ like/dislike 1 lần cho 1 reply
+  @@index([replyId])
+  @@index([userId])
+}
+
+// Comment Reply - Trả lời bình luận
+model CommentReply {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  commentId Int
+  content   String   // Nội dung trả lời
+  isEdited  Boolean  @default(false) // Đã chỉnh sửa chưa
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  comment   Comment  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  
+  // Relations
+  media     ReplyMedia[]   // Ảnh/video đính kèm trong reply
+  likes     ReplyLike[]    // Like/dislike cho reply
+  
+  @@index([commentId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+// Reply Media - Ảnh/video đính kèm trong reply
+model ReplyMedia {
+  id        Int      @id @default(autoincrement())
+  replyId   Int
+  mediaUrl  String   // URL ảnh/video
+  mediaType String   // "image" hoặc "video"
+  createdAt DateTime @default(now())
+  
+  reply     CommentReply @relation(fields: [replyId], references: [id], onDelete: Cascade)
+  
+  @@index([replyId])
+}
+
+
+
