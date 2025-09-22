@@ -91,6 +91,9 @@ const MovieDetail: React.FC = () => {
   const previousTimeRef = useRef<number>(0);
   const hasProcessedUrlParam = useRef<boolean>(false);
   const isPlayOperationInProgress = useRef<boolean>(false);
+  const seekTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastSeekTime = useRef<number>(0);
+  const seekDebounceDelay = 300; // 300ms debounce
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -99,6 +102,8 @@ const MovieDetail: React.FC = () => {
   const [duration, setDuration] = useState(0);
   const [showControls, setShowControls] = useState(true);
   const [isSeeking, setIsSeeking] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [wasPlayingBeforeSeek, setWasPlayingBeforeSeek] = useState(false);
 
   // Quảng cáo state
   const [adPlaying, setAdPlaying] = useState<Ad | null>(null);
@@ -156,6 +161,38 @@ const MovieDetail: React.FC = () => {
   const [hasMoreComments, setHasMoreComments] = useState<boolean>(true);
   const commentsSectionRef = useRef<HTMLDivElement>(null);
 
+  // -------------------- FULLSCREEN DETECTION --------------------
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const isCurrentlyFullscreen = !!document.fullscreenElement;
+      setIsFullscreen(isCurrentlyFullscreen);
+      
+      // Ẩn controls khi vào fullscreen, hiện lại khi thoát
+      if (isCurrentlyFullscreen) {
+        setShowControls(false);
+        // Auto-hide controls sau 3 giây trong fullscreen
+        const timer = setTimeout(() => {
+          setShowControls(false);
+        }, 3000);
+        return () => clearTimeout(timer);
+      } else {
+        setShowControls(true);
+      }
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
+    };
+  }, []);
+
   // Memoized fetch function
   const fetchMovieDetails = useCallback(async () => {
     if (!slug) return;
@@ -167,7 +204,6 @@ const MovieDetail: React.FC = () => {
       const videoUrl = data.episodes?.[0]?.videoUrl ?? data.videoUrl;
       setMovie({ ...data, videoUrl, cast: data.cast ?? [] });
     } catch (error) {
-      console.error('Error fetching movie details:', error);
       setMovie(null);
     } finally {
       setIsLoading(false);
@@ -197,7 +233,6 @@ const MovieDetail: React.FC = () => {
           setIsLiked(data.isFavorite);
         }
       } catch (error) {
-        console.error('Error checking favorite status:', error);
       }
     };
 
@@ -225,12 +260,10 @@ const MovieDetail: React.FC = () => {
     const observer = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
-          console.log('Intersection Observer triggered:', entry.isIntersecting);
           if (entry.isIntersecting) {
             // Debounce to avoid multiple rapid triggers
             clearTimeout(timeoutId);
             timeoutId = setTimeout(() => {
-              console.log('Setting showComments to true');
               setShowComments(true);
             }, 100);
           }
@@ -243,10 +276,8 @@ const MovieDetail: React.FC = () => {
     );
 
     if (commentsSectionRef.current) {
-      console.log('Starting to observe comments section');
       observer.observe(commentsSectionRef.current);
     } else {
-      console.log('Comments section ref not found');
     }
 
     return () => {
@@ -292,7 +323,6 @@ const MovieDetail: React.FC = () => {
         const data: Ad[] = await res.json();
         setAds(data);
       } catch (error) {
-        console.error('Error fetching ads:', error);
       }
     };
     fetchAds();
@@ -336,7 +366,6 @@ const MovieDetail: React.FC = () => {
         adPlayedIds.current.push(adPlaying.id); // đánh dấu đã chơi
         adViewedRef.current[adPlaying.id] = true; // đánh dấu đã tăng view
       } catch (error) {
-        console.error('Error incrementing ad view:', error);
       }
     };
 
@@ -461,6 +490,12 @@ const MovieDetail: React.FC = () => {
     setIsManualContinue(false); // Reset manual continue state
     setShowContinuePrompt(false); // Reset continue prompt
     setIsSeeking(false); // Reset seeking state
+    
+    // Clear any pending seek timeouts
+    if (seekTimeoutRef.current) {
+      clearTimeout(seekTimeoutRef.current);
+      seekTimeoutRef.current = null;
+    }
   }, [slug]);
 
   // -------------------- SAVE WATCH PROGRESS --------------------
@@ -488,11 +523,9 @@ const MovieDetail: React.FC = () => {
           if (response.ok) {
             await response.json();
           } else {
-            console.error('Error saving watch progress');
           }
         }
       } catch (error) {
-        console.error('Error saving progress:', error);
       }
     };
 
@@ -533,7 +566,6 @@ const MovieDetail: React.FC = () => {
             keepalive: true
           });
         } catch (error) {
-          console.error('Error saving final progress:', error);
         }
       }
     };
@@ -544,7 +576,7 @@ const MovieDetail: React.FC = () => {
 
     window.addEventListener('beforeunload', handleBeforeUnload);
 
-    return () => {
+    return () => {              
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, [user, movie, currentTime]);
@@ -600,11 +632,14 @@ const MovieDetail: React.FC = () => {
 
     const video = videoRef.current;
     if (video.paused) {
-      safePlay(video).catch(() => {
+      safePlay(video).then(() => {
+        setIsPlaying(true);
+      }).catch(() => {
         // Handle play error silently
       });
     } else {
       video.pause();
+      setIsPlaying(false);
     }
   };
 
@@ -765,43 +800,170 @@ const MovieDetail: React.FC = () => {
     if (newVolume > 0 && isMuted) setIsMuted(false);
   }, [isMuted]);
 
+  // -------------------- IMPROVED SEEKING WITH DEBOUNCE --------------------
+  const debouncedSeek = useCallback((newTime: number) => {
+    // Clear any existing timeout
+    if (seekTimeoutRef.current) {
+      clearTimeout(seekTimeoutRef.current);
+    }
+
+    // Store the seek time for immediate UI update
+    lastSeekTime.current = newTime;
+    setCurrentTime(newTime);
+
+    // Debounce the actual video seek operation
+    seekTimeoutRef.current = setTimeout(() => {
+      if (videoRef.current && !adPlaying) {
+        try {
+          // Only seek if the video is ready and the time is valid
+          if (videoRef.current.readyState >= 2 && 
+              !isNaN(newTime) && 
+              newTime >= 0 && 
+              newTime <= duration) {
+            // Store current playing state
+            const wasPlaying = !videoRef.current.paused;
+            
+            // Perform the seek
+            videoRef.current.currentTime = newTime;
+            
+            // If video was playing before seek, ensure it continues playing
+            if (wasPlaying && videoRef.current.paused) {
+              // Small delay to ensure seek is complete
+              setTimeout(() => {
+                if (videoRef.current && videoRef.current.paused) {
+                  safePlay(videoRef.current).then(() => {
+                    setIsPlaying(true);
+                  }).catch(() => {
+                    // Handle play error silently
+                  });
+                }
+              }, 100);
+            }
+          }
+        } catch (error) {   
+        }
+      }
+      seekTimeoutRef.current = null;
+    }, seekDebounceDelay);
+  }, [adPlaying, duration]);
+
+  // -------------------- IMMEDIATE SEEK FOR CRITICAL OPERATIONS --------------------
+  const immediateSeek = useCallback((newTime: number) => {
+    // Clear any pending debounced seek
+    if (seekTimeoutRef.current) {
+      clearTimeout(seekTimeoutRef.current);
+      seekTimeoutRef.current = null;
+    }
+
+    if (videoRef.current && !adPlaying) {
+      try {
+        if (videoRef.current.readyState >= 2 && 
+            !isNaN(newTime) && 
+            newTime >= 0 && 
+            newTime <= duration) {
+          // Store current playing state
+          const wasPlaying = !videoRef.current.paused;
+          
+          // Perform the seek
+          videoRef.current.currentTime = newTime;
+          setCurrentTime(newTime);
+          
+          // If video was playing before seek, ensure it continues playing
+          if (wasPlaying && videoRef.current.paused) {
+            // Small delay to ensure seek is complete
+            setTimeout(() => {
+              if (videoRef.current && videoRef.current.paused) {
+                safePlay(videoRef.current).then(() => {
+                  setIsPlaying(true);
+                }).catch(() => {
+                  // Handle play error silently
+                });
+              }
+            }, 100);
+          }
+        }
+      } catch (error) {   
+      }
+    }
+  }, [adPlaying, duration]);
+
   const handleSeekMouseDown = () => {
     if (adPlaying) return;
+    // Store current playing state before seeking
+    if (videoRef.current) {
+      setWasPlayingBeforeSeek(!videoRef.current.paused);
+    }
     setIsSeeking(true);
   };
 
   const handleSeekMouseUp = (e: React.MouseEvent<HTMLInputElement>) => {
     if (adPlaying) return;
-    if (videoRef.current) {
-      const newTime = Number(e.currentTarget.value);
-      videoRef.current.currentTime = newTime;
-      setCurrentTime(newTime);
-
-      // Reset seeking state - video will continue playing naturally
-      setIsSeeking(false);
-    } else {
-      setIsSeeking(false);
+    
+    const newTime = Number(e.currentTarget.value);
+    
+    // Final seek when mouse is released - use immediate seek
+    if (!isNaN(newTime) && newTime >= 0 && newTime <= duration) {
+      immediateSeek(newTime);
     }
+    
+    setIsSeeking(false);
+    
+    // Resume playing if it was playing before seek
+    if (wasPlayingBeforeSeek && videoRef.current) {
+      setTimeout(() => {
+        if (videoRef.current && videoRef.current.paused) {
+          safePlay(videoRef.current).then(() => {
+            setIsPlaying(true);
+          }).catch(() => {
+            // Handle play error silently
+          });
+        }
+      }, 150);
+    }
+    
+    setWasPlayingBeforeSeek(false);
   };
 
   const handleSeekChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (adPlaying) return;
+    
     const newTime = Number(e.target.value);
-    setCurrentTime(newTime);
+    if (!isNaN(newTime) && newTime >= 0 && newTime <= duration) {
+      debouncedSeek(newTime);
+    }
   };
 
   const skip = (seconds: number) => {
     if (adPlaying) return;
     if (!videoRef.current) return;
+    
     const newTime = Math.max(0, Math.min(videoRef.current.currentTime + seconds, duration));
-    setCurrentTime(newTime);
-    videoRef.current.currentTime = newTime;
+    if (!isNaN(newTime)) {
+      const wasPlaying = !videoRef.current.paused;
+      immediateSeek(newTime);
+      
+      // If video was playing, ensure it continues after skip
+      if (wasPlaying) {
+        setTimeout(() => {
+          if (videoRef.current && videoRef.current.paused) {
+            safePlay(videoRef.current).then(() => {
+              setIsPlaying(true);
+            }).catch(() => {
+              // Handle play error silently
+            });
+          }
+        }, 100);
+      }
+    }
   };
 
   const toggleFullscreen = () => {
     if (!videoRef.current) return;
-    if (document.fullscreenElement) document.exitFullscreen();
-    else videoRef.current.requestFullscreen();
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else {
+      videoRef.current.requestFullscreen();
+    }
   };
 
   const formatTime = (time: number) => {
@@ -831,7 +993,6 @@ const MovieDetail: React.FC = () => {
     try {
       await fetch(`http://localhost:3000/api/ads/${adId}/view`, { method: "POST" });
     } catch (error) {
-      console.error('Error incrementing overlay ad view:', error);
     }
   };
 
@@ -882,7 +1043,6 @@ const MovieDetail: React.FC = () => {
         }
       }
     } catch (error) {
-      console.error('Error handling like:', error);
     }
   };
 
@@ -914,7 +1074,6 @@ const MovieDetail: React.FC = () => {
         fetchMovieRatings();
       }
     } catch (error) {
-      console.error('Error rating movie:', error);
     }
   };
 
@@ -930,7 +1089,6 @@ const MovieDetail: React.FC = () => {
         setTotalRatings(data.totalRatings || 0);
       }
     } catch (error) {
-      console.error('Error fetching ratings:', error);
     }
   };
 
@@ -953,7 +1111,6 @@ const MovieDetail: React.FC = () => {
         setUserRating(data.userRating || 0);
       }
     } catch (error) {
-      console.error('Error fetching user rating:', error);
     } finally {
       setIsLoadingUserRating(false);
     }
@@ -961,14 +1118,11 @@ const MovieDetail: React.FC = () => {
 
   // -------------------- FETCH COMMENTS --------------------
   const fetchComments = useCallback(async (forceRefresh = false, loadMore = false) => {
-    console.log('fetchComments called:', { movie: !!movie, commentsLoaded, forceRefresh, loadMore });
 
     if (!movie || (commentsLoaded && !forceRefresh && !loadMore)) {
-      console.log('fetchComments early return:', { movie: !!movie, commentsLoaded, forceRefresh, loadMore });
       return;
     }
 
-    console.log('Starting to fetch comments...');
     setIsLoadingComments(true);
     try {
       const token = localStorage.getItem('token');
@@ -980,14 +1134,11 @@ const MovieDetail: React.FC = () => {
 
       const page = loadMore ? commentsPage + 1 : 1;
       const url = `http://localhost:3000/api/movies/${movie.id}/comments?page=${page}&limit=10`;
-      console.log('Fetching comments from:', url);
 
       const response = await fetch(url, { headers });
-      console.log('Comments response status:', response.status);
 
       if (response.ok) {
         const data = await response.json();
-        console.log('Comments data received:', data);
 
         if (loadMore) {
           setComments(prev => [...prev, ...(data.comments || [])]);
@@ -999,12 +1150,9 @@ const MovieDetail: React.FC = () => {
 
         setHasMoreComments(data.hasMore || false);
         setCommentsLoaded(true);
-        console.log('Comments loaded successfully');
       } else {
-        console.error('Failed to fetch comments:', response.status, response.statusText);
       }
     } catch (error) {
-      console.error('Error fetching comments:', error);
     } finally {
       setIsLoadingComments(false);
     }
@@ -1012,9 +1160,7 @@ const MovieDetail: React.FC = () => {
 
   // -------------------- FETCH COMMENTS WHEN SHOW COMMENTS CHANGES --------------------
   useEffect(() => {
-    console.log('useEffect showComments changed:', { showComments, commentsLoaded });
     if (showComments && !commentsLoaded) {
-      console.log('Triggering fetchComments from useEffect');
       fetchComments();
     }
   }, [showComments, commentsLoaded, fetchComments]);
@@ -1025,7 +1171,6 @@ const MovieDetail: React.FC = () => {
       // Fallback: Load comments after 2 seconds if intersection observer doesn't trigger
       const fallbackTimer = setTimeout(() => {
         if (!showComments) {
-          console.log('Fallback: Loading comments after timeout');
           setShowComments(true);
         }
       }, 2000);
@@ -1066,7 +1211,6 @@ const MovieDetail: React.FC = () => {
         fetchComments(true);
       }
     } catch (error) {
-      console.error('Error submitting comment:', error);
     }
   };
 
@@ -1092,7 +1236,6 @@ const MovieDetail: React.FC = () => {
         fetchComments(true);
       }
     } catch (error) {
-      console.error('Error liking comment:', error);
     }
   };
 
@@ -1118,7 +1261,6 @@ const MovieDetail: React.FC = () => {
         fetchComments(true);
       }
     } catch (error) {
-      console.error('Error liking reply:', error);
     }
   };
 
@@ -1217,7 +1359,6 @@ const MovieDetail: React.FC = () => {
         fetchComments(true);
       }
     } catch (error) {
-      console.error('Error submitting reply:', error);
     }
   };
 
@@ -1260,7 +1401,6 @@ const MovieDetail: React.FC = () => {
         fetchComments(true);
       }
     } catch (error) {
-      console.error('Error editing comment:', error);
     }
   };
 
@@ -1283,7 +1423,6 @@ const MovieDetail: React.FC = () => {
           fetchComments(true);
         }
       } catch (error) {
-        console.error('Error deleting comment:', error);
       }
     }
   };
@@ -1337,7 +1476,6 @@ const MovieDetail: React.FC = () => {
         fetchComments(true);
       }
     } catch (error) {
-      console.error('Error editing reply:', error);
     }
   };
 
@@ -1360,7 +1498,6 @@ const MovieDetail: React.FC = () => {
           fetchComments(true);
         }
       } catch (error) {
-        console.error('Error deleting reply:', error);
       }
     }
   };
@@ -1446,7 +1583,6 @@ const MovieDetail: React.FC = () => {
                       })
                     });
                   } catch (error) {
-                    console.error('Error saving progress on navigation:', error);
                   }
                 }
                 navigate(-1);
@@ -1473,8 +1609,18 @@ const MovieDetail: React.FC = () => {
               <div className="bg-gray-900 rounded-2xl overflow-hidden shadow-2xl">
                 <div
                   className="relative bg-black"
-                  onMouseEnter={() => setShowControls(true)}
-                  onMouseLeave={() => { if (!isSeeking) setShowControls(false); }}
+                  onMouseEnter={() => !isFullscreen && setShowControls(true)}
+                  onMouseLeave={() => { if (!isSeeking && !isFullscreen) setShowControls(false); }}
+                  onMouseMove={() => {
+                    if (isFullscreen) {
+                      setShowControls(true);
+                      // Auto-hide controls in fullscreen after 3 seconds
+                      const timer = setTimeout(() => {
+                        if (!isSeeking) setShowControls(false);
+                      }, 3000);
+                      return () => clearTimeout(timer);
+                    }
+                  }}
                 >
                   <video
                     ref={videoRef}
@@ -1495,12 +1641,23 @@ const MovieDetail: React.FC = () => {
                       // Video is seeking - let it continue naturally without interference
                     }}
                     onSeeked={() => {
-                      // Video finished seeking - no need to manually resume
+                      // Video finished seeking - ensure it continues playing if it was playing before
+                      if (videoRef.current && (isPlaying || wasPlayingBeforeSeek) && videoRef.current.paused) {
+                        setTimeout(() => {
+                          if (videoRef.current && videoRef.current.paused) {
+                            safePlay(videoRef.current).then(() => {
+                              setIsPlaying(true);
+                            }).catch(() => {
+                              // Handle play error silently
+                            });
+                          }
+                        }, 50);
+                      }
                     }}
                     src={adPlaying ? adPlaying.videoUrl : movie.videoUrl}
                     autoPlay={!!adPlaying || isResumingAfterAd}
                     muted={isMuted}
-                    controls={!adPlaying}
+                    controls={false} // Always use custom controls
                     controlsList={adPlaying ? "nodownload nofullscreen noremoteplayback" : undefined}
                     disablePictureInPicture={!!adPlaying}
                     onEnded={() => {
@@ -1631,7 +1788,6 @@ const MovieDetail: React.FC = () => {
                             muted
                             playsInline
                             onError={(e) => {
-                              console.error('Error playing overlay ad video:', e);
                               // Fallback to image if video fails
                               const videoElement = e.target as HTMLVideoElement;
                               const img = document.createElement('img');
@@ -1646,9 +1802,24 @@ const MovieDetail: React.FC = () => {
                     );
                   })()}
 
-                  {/* Controls */}
+                  {/* Custom Controls - Always visible but styled for fullscreen */}
                   {!adPlaying && (
-                    <div className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent p-6 transition-all duration-300 ${showControls ? 'opacity-100' : 'opacity-0'}`} style={{ pointerEvents: 'auto' }}>
+                    <div 
+                      className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent p-6 transition-all duration-300 ${
+                        showControls ? 'opacity-100' : 'opacity-0'
+                      } ${isFullscreen ? 'z-[999999]' : ''}`} 
+                      style={{ 
+                        pointerEvents: showControls ? 'auto' : 'none',
+                        // Ensure controls are always on top in fullscreen
+                        ...(isFullscreen && {
+                          position: 'fixed',
+                          bottom: 0,
+                          left: 0,
+                          right: 0,
+                          zIndex: 999999
+                        })
+                      }}
+                    >
                       <>
                         <input
                           type="range"
@@ -1658,18 +1829,10 @@ const MovieDetail: React.FC = () => {
                           onMouseDown={handleSeekMouseDown}
                           onMouseUp={handleSeekMouseUp}
                           onChange={handleSeekChange}
-                          onInput={(e) => {
-                            if (adPlaying) return;
-                            const newTime = Number((e.target as HTMLInputElement).value);
-
-                            setCurrentTime(newTime);
-                            if (videoRef.current) {
-                              videoRef.current.currentTime = newTime;
-                            }
-                          }}
                           className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer slider pointer-events-auto z-50 mb-2"
                           style={{
                             background: `linear-gradient(to right, #dc2626 0%, #dc2626 ${safeDuration ? (safeCurrentTime / safeDuration) * 100 : 0}%, #4b5563 ${safeDuration ? (safeCurrentTime / safeDuration) * 100 : 0}%, #4b5563 100%)`,
+                            pointerEvents: 'auto'
                           }}
                         />
                         <div className="flex justify-between text-white text-sm mb-4 font-medium">
@@ -1679,19 +1842,35 @@ const MovieDetail: React.FC = () => {
                       </>
                       <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-4">
-                          <button onClick={() => skip(-10)} className="text-white hover:text-red-400 transition-colors p-2 hover:bg-white/10 rounded-full">
+                          <button 
+                            onClick={() => skip(-10)} 
+                            className="text-white hover:text-red-400 transition-colors p-2 hover:bg-white/10 rounded-full"
+                            style={{ pointerEvents: 'auto' }}
+                          >
                             <SkipBack className="h-5 w-5" />
                           </button>
-                          <button onClick={togglePlay} className="bg-red-600 hover:bg-red-700 text-white rounded-full p-3 transition-all duration-200 hover:scale-110 shadow-lg">
+                          <button 
+                            onClick={togglePlay} 
+                            className="bg-red-600 hover:bg-red-700 text-white rounded-full p-3 transition-all duration-200 hover:scale-110 shadow-lg"
+                            style={{ pointerEvents: 'auto' }}
+                          >
                             {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5 fill-current ml-0.5" />}
                           </button>
-                          <button onClick={() => skip(10)} className="text-white hover:text-red-400 transition-colors p-2 hover:bg-white/10 rounded-full">
+                          <button 
+                            onClick={() => skip(10)} 
+                            className="text-white hover:text-red-400 transition-colors p-2 hover:bg-white/10 rounded-full"
+                            style={{ pointerEvents: 'auto' }}
+                          >
                             <SkipForward className="h-5 w-5" />
                           </button>
                         </div>
                         <div className="flex items-center space-x-4">
                           <div className="flex items-center space-x-3">
-                            <button onClick={toggleMute} className="text-white hover:text-red-400 transition-colors p-2 hover:bg-white/10 rounded-full">
+                            <button 
+                              onClick={toggleMute} 
+                              className="text-white hover:text-red-400 transition-colors p-2 hover:bg-white/10 rounded-full"
+                              style={{ pointerEvents: 'auto' }}
+                            >
                               {isMuted || volume === 0 ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
                             </button>
                             <input
@@ -1702,9 +1881,14 @@ const MovieDetail: React.FC = () => {
                               value={isMuted ? 0 : volume}
                               onChange={handleVolumeChange}
                               className="w-24 h-2 bg-gray-600 rounded-lg cursor-pointer"
+                              style={{ pointerEvents: 'auto' }}
                             />
                           </div>
-                          <button onClick={toggleFullscreen} className="text-white hover:text-red-400 transition-colors p-2 hover:bg-white/10 rounded-full">
+                          <button 
+                            onClick={toggleFullscreen} 
+                            className="text-white hover:text-red-400 transition-colors p-2 hover:bg-white/10 rounded-full"
+                            style={{ pointerEvents: 'auto' }}
+                          >
                             <Maximize className="h-5 w-5" />
                           </button>
                         </div>
@@ -2076,7 +2260,6 @@ const MovieDetail: React.FC = () => {
                     <p className="text-gray-400 mt-2">Đang tải bình luận...</p>
                     <button
                       onClick={() => {
-                        console.log('Manual load comments button clicked');
                         setShowComments(true);
                       }}
                       className="mt-4 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors duration-200"
