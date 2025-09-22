@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require("express");
 const cors = require("cors");
+const path = require("path");
 const { PrismaClient } = require("@prisma/client");
 
 const categoryRoutes = require("./Routes/CategoryRoutes");
@@ -21,6 +22,9 @@ const prisma = new PrismaClient();
 app.use(cors());
 app.use(express.json());
 
+// Serve static files from React build
+app.use(express.static('../project/dist'));
+
 // Routes
 app.use("/api/categories", categoryRoutes);
 app.use("/api/genres", genreRoutes);
@@ -35,8 +39,14 @@ app.use("/api", ratingRoutes);
 app.use("/api", commentRoutes);
 app.use("/api/home-banners", homeBannerRoutes);
 
-app.listen(3000, () => {
-  console.log("🚀 Server đang chạy trên port 3000");
-  console.log("📡 API Base URL: http://localhost:3000/api");
+// Catch all handler: send back React's index.html file for any non-API routes
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../project/dist/index.html'));
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`🚀 Server đang chạy trên port ${PORT}`);
+  console.log(`📡 API Base URL: http://localhost:${PORT}/api`);
   console.log("🎬 WebPhim Backend Server đã sẵn sàng!");
 });
