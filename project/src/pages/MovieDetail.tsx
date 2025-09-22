@@ -936,6 +936,7 @@ const MovieDetail: React.FC = () => {
   const skip = (seconds: number) => {
     if (adPlaying) return;
     if (!videoRef.current) return;
+    console.log(videoRef.current.currentTime);
     
     const newTime = Math.max(0, Math.min(videoRef.current.currentTime + seconds, duration));
     if (!isNaN(newTime)) {
