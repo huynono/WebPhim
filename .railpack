@@ -1,6 +1,6 @@
 {
   "build": {
-    "command": "bash start.sh"
+    "command": "cd backend && npm install"
   },
   "start": {
     "command": "cd backend && npm start"

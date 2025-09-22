@@ -4,7 +4,7 @@
   "description": "WebPhim Backend API",
   "main": "backend/index.js",
   "scripts": {
-    "start": "bash start.sh",
+    "start": "cd backend && npm install && npm start",
     "dev": "cd backend && npm run dev"
   },
   "keywords": ["movie", "streaming", "api", "nodejs"],

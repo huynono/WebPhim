@@ -35,8 +35,9 @@ app.use("/api", ratingRoutes);
 app.use("/api", commentRoutes);
 app.use("/api/home-banners", homeBannerRoutes);
 
-app.listen(3000, () => {
-  console.log("🚀 Server đang chạy trên port 3000");
-  console.log("📡 API Base URL: http://localhost:3000/api");
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`🚀 Server đang chạy trên port ${PORT}`);
+  console.log(`📡 API Base URL: http://localhost:${PORT}/api`);
   console.log("🎬 WebPhim Backend Server đã sẵn sàng!");
 });
